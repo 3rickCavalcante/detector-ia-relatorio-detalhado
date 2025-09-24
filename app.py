@@ -5,10 +5,14 @@ import math
 import joblib
 import os
 
+# CORREÇÃO: Importar sklearn ANTES de usar RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
+
 app = Flask(__name__)
 
 class AIDetectorComRelatorio:
     def __init__(self):
+        # AGORA o RandomForestClassifier está disponível
         self.model = RandomForestClassifier(n_estimators=50, random_state=42)
         self.is_trained = False
         self.carregar_ou_treinar_modelo()
@@ -20,13 +24,11 @@ class AIDetectorComRelatorio:
                 r'pode-se inferir', r'é fundamental observar', r'observa-se que',
                 r'conclui-se que', r'de maneira clara e objetiva', r'abordagem sistemática',
                 r'o presente estudo', r'de acordo com', r'vale ressaltar', r'verifica-se que',
-                r'cabe salientar', r'é pertinente mencionar', r'pressupõe-se que',
-                r'infere-se que', r'deduz-se que', r'constata-se que', r'evidencia-se que'
+                r'cabe salientar', r'é pertinente mencionar', r'pressupõe-se que'
             ],
             'conectivos_complexos': [
                 r'portanto', r'consequentemente', r'adicionalmente', r'notavelmente',
-                r'consideravelmente', r'significativamente', r'efetivamente',
-                r'sobretudo', r'primordialmente', r'essencialmente'
+                r'consideravelmente', r'significativamente', r'efetivamente'
             ],
             'estruturas_passivas': [
                 r'é realizado', r'é observado', r'é verificado', r'é constatado',
@@ -102,38 +104,14 @@ class AIDetectorComRelatorio:
                     'posicao': (match.start(), match.end())
                 })
         
-        # Analisar repetição de estruturas
-        frases = self.dividir_frases(texto)
-        if len(frases) > 2:
-            inicios_frases = []
-            for frase in frases:
-                palavras = self.tokenizacao_simples(frase)
-                if palavras:
-                    inicios_frases.append(palavras[0])
-            
-            # Verificar repetição de inícios de frases
-            from collections import Counter
-            contador = Counter(inicios_frases)
-            for palavra, count in contador.most_common(3):
-                if count > 1 and count/len(inicios_frases) > 0.3:
-                    # Encontrar todas as ocorrências desta palavra no início de frases
-                    padrao = r'(^|\.\s+)' + re.escape(palavra) + r'\b'
-                    matches = list(re.finditer(padrao, texto, re.IGNORECASE | re.MULTILINE))
-                    if len(matches) > 1:
-                        termos_detectados.append({
-                            'termo': palavra,
-                            'tipo': 'repeticao_estrutural',
-                            'justificativa': f'Repetição de "{palavra}" no início de {len(matches)} frases',
-                            'contexto': 'Padrão detectado em múltiplas frases',
-                            'posicao': (matches[0].start(), matches[0].end())
-                        })
-        
         return termos_detectados
     
     def gerar_texto_destacado(self, texto, termos_detectados):
         """Gera versão do texto com termos suspeitos destacados"""
+        if not termos_detectados:
+            return texto
+            
         texto_destacado = texto
-        
         # Ordenar termos por posição (do final para o início para evitar problemas com índices)
         termos_ordenados = sorted(termos_detectados, key=lambda x: x['posicao'][0], reverse=True)
         
@@ -195,7 +173,7 @@ class AIDetectorComRelatorio:
                 print("✅ Modelo carregado")
                 return
         except:
-            pass
+            print("ℹ️  Modelo não encontrado, treinando novo...")
         
         self.treinar_modelo()
     
@@ -230,9 +208,9 @@ class AIDetectorComRelatorio:
             self.model.fit(features, labels)
             self.is_trained = True
             joblib.dump(self.model, 'modelo_web.pkl')
-            print("✅ Modelo treinado com exemplos de IA e humanos")
+            print("✅ Modelo treinado com sucesso")
         except Exception as e:
-            print(f"❌ Erro: {e}")
+            print(f"❌ Erro no treinamento: {e}")
             self.is_trained = False
     
     def predict(self, texto):
@@ -257,10 +235,11 @@ class AIDetectorComRelatorio:
             if self.is_trained:
                 proba = self.model.predict_proba([features])[0]
                 prob_ia = float(proba[1])
+                confianca = float(np.max(proba))
             else:
+                # Fallback heurístico
                 prob_ia = 0.3 if feat_dict['formalidade'] > 0.1 else 0.7
-            
-            confianca = min(len(texto) / 2000, 0.95)
+                confianca = 0.6
             
             # Agrupar termos por tipo para relatório
             termos_por_tipo = {}
@@ -283,7 +262,6 @@ class AIDetectorComRelatorio:
                 }
             }
             
-            print(f"✅ Análise concluída: {len(termos_suspeitos)} termos suspeitos detectados")
             return resultado
             
         except Exception as e:
@@ -296,7 +274,7 @@ class AIDetectorComRelatorio:
                 'texto_destacado': texto
             }
 
-# Inicializar detector
+# CORREÇÃO: Inicializar DEPOIS da definição da classe
 detector = AIDetectorComRelatorio()
 
 @app.route('/')
@@ -307,7 +285,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Detector de IA - Relatório Detalhado</title>
+        <title>Detector de IA - Análise Detalhada</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
@@ -356,7 +334,6 @@ def index():
             .termo-suspeito[data-tipo="conectivo_complexo"] { border-color: #8b5cf6; background-color: #faf5ff; }
             .termo-suspeito[data-tipo="voz_passiva"] { border-color: #06b6d4; background-color: #ecfeff; }
             .termo-suspeito[data-tipo="superlativo"] { border-color: #f59e0b; background-color: #fffbeb; }
-            .termo-suspeito[data-tipo="repeticao_estrutural"] { border-color: #10b981; background-color: #ecfdf5; }
             
             .texto-destacado {
                 background: white;
@@ -434,11 +411,10 @@ def index():
         </div>
         
         <script>
-            // Atualizar contador em tempo real
             document.getElementById('textInput').addEventListener('input', function() {
                 const text = this.value;
                 const chars = text.length;
-                const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+                const words = text.trim() ? text.trim().split(/\\s+/).length : 0;
                 const sentences = text.split(/[.!?]+/).length - 1;
                 document.getElementById('textStats').innerHTML = 
                     `Caracteres: ${chars} | Palavras: ${words} | Frases: ${sentences}`;
@@ -483,7 +459,6 @@ def index():
                             veredito = 'Provavelmente Humano';
                         }
                         
-                        // Gerar relatório detalhado
                         let relatorioHTML = gerarRelatorioDetalhado(result);
                         
                         resultDiv.innerHTML = `
@@ -499,7 +474,6 @@ def index():
                         resultDiv.innerHTML = `<p style="color: red;">❌ Erro: ${data.error}</p>`;
                     }
                 } catch (error) {
-                    console.error('Erro de conexão:', error);
                     resultDiv.innerHTML = '<p style="color: red;">❌ Erro de conexão. Tente novamente.</p>';
                 } finally {
                     button.disabled = false;
@@ -509,7 +483,6 @@ def index():
             
             function gerarRelatorioDetalhado(result) {
                 const termos = result.termos_suspeitos || [];
-                const stats = result.estatisticas_deteccao || {};
                 
                 if (termos.length === 0) {
                     return `
@@ -543,8 +516,7 @@ def index():
                         'expressao_formal': 'Expressões Formais',
                         'conectivo_complexo': 'Conectivos Complexos',
                         'voz_passiva': 'Voz Passiva',
-                        'superlativo': 'Superlativos',
-                        'repeticao_estrutural': 'Repetição Estrutural'
+                        'superlativo': 'Superlativos'
                     }[tipo] || tipo;
                     
                     tiposHTML += `
@@ -577,10 +549,6 @@ def index():
                                 <div class="legenda-cor" style="background-color: #fffbeb; border: 1px solid #f59e0b;"></div>
                                 <span>Superlativos</span>
                             </div>
-                            <div class="legenda-item">
-                                <div class="legenda-cor" style="background-color: #ecfdf5; border: 1px solid #10b981;"></div>
-                                <span>Repetição Estrutural</span>
-                            </div>
                         </div>
                         
                         <div class="texto-destacado">
@@ -601,7 +569,6 @@ def index():
 
 Por outro lado, quando fui ao mercado hoje, o padeiro foi muito simpático comigo. Ele me deu um café e a gente conversou um pouco sobre o time de futebol. Achei bem legal isso, sabe?`;
 
-            // Atualizar contador inicial
             document.getElementById('textInput').dispatchEvent(new Event('input'));
         </script>
     </body>
@@ -645,7 +612,7 @@ def health():
         'status': 'online', 
         'model': 'active',
         'features': 'relatorio_detalhado',
-        'version': '2.0'
+        'version': '2.0_corrigido'
     })
 
 if __name__ == '__main__':
